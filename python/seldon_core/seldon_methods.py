@@ -51,22 +51,59 @@ def handle_raw_custom_metrics(
     seldon_metrics: SeldonMetrics,
     is_proto: bool,
     method: str,
+    user_model: Any,
 ):
     """
-    Update SeldonMetrics object with custom metrics from raw methods.
-    If INCLUDE_METRICS_IN_CLIENT_RESPONSE environmental variable is set to "true"
-    metrics will be dropped from msg.
+    Handle custom metrics for raw methods.
+
+    Gets the custom metrics from msg (raw methods response).
+    Then passes it to client_custom_metrics to update seldon_metrics and concatenate with user_model.metrics() (if implemented),
+    and finally overwrites msg metrics with concatenated metrics 
+    If INCLUDE_METRICS_IN_CLIENT_RESPONSE environmental variable is set else drop metrics from msg.
+
+    Parameters
+    ----------
+    msg:
+        A SeldonMessage instance or a dict
+    seldon_metrics
+        A SeldonMetrics instance
+    is_proto:
+        True if msg is a SeldonMessage instance, False otherwise
+    method:
+        tag of a method that collected the metrics
+    user_model
+       A Seldon user model
+    Returns
+    -------
+       None
     """
-    metrics = []
+    # Get raw methods response custom metrics
     if is_proto:
-        metrics = seldon_message_to_json(msg.meta).get("metrics", [])
-        if metrics and not INCLUDE_METRICS_IN_CLIENT_RESPONSE:
-            del msg.meta.metrics[:]
+        runtime_metrics = seldon_message_to_json(msg.meta).get("metrics", [])
     elif isinstance(msg, dict):
-        metrics = msg.get("meta", {}).get("metrics", [])
-        if metrics and not INCLUDE_METRICS_IN_CLIENT_RESPONSE:
+        runtime_metrics = msg.get("meta", {}).get("metrics", [])
+    else:
+        runtime_metrics = []
+
+    # Update metrics with user_model.metrics() (if implemented), write both to seldon_metrics, and return
+    metrics = client_custom_metrics(
+        user_model,
+        seldon_metrics,
+        method, 
+        runtime_metrics,
+    )
+    
+    # Set raw methods response custom metrics
+    if is_proto:
+        del msg.meta.metrics[:]
+        if INCLUDE_METRICS_IN_CLIENT_RESPONSE:
+            msg.meta.metrics.extend(prediction_pb2.Metric(**metric_dict) for metric_dict in metrics)
+    elif isinstance(msg, dict):
+        if INCLUDE_METRICS_IN_CLIENT_RESPONSE:
+            msg.setdefault("meta", {})
+            msg["metrics"] = metrics
+        elif msg.get("meta", {}).get("metrics", []):
             del msg["meta"]["metrics"]
-    seldon_metrics.update(metrics, method)
 
 
 def predict(
@@ -103,7 +140,11 @@ def predict(
             try:
                 response = user_model.predict_raw(request)
                 handle_raw_custom_metrics(
-                    response, seldon_metrics, is_proto, PREDICT_METRIC_METHOD_TAG
+                    response,
+                    seldon_metrics,
+                    is_proto,
+                    PREDICT_METRIC_METHOD_TAG,
+                    user_model,
                 )
                 return response
             except SeldonNotImplementedError:
@@ -195,7 +236,11 @@ def send_feedback(
             try:
                 response = user_model.send_feedback_raw(request)
                 handle_raw_custom_metrics(
-                    response, seldon_metrics, True, FEEDBACK_METRIC_METHOD_TAG
+                    response,
+                    seldon_metrics,
+                    True,
+                    FEEDBACK_METRIC_METHOD_TAG,
+                    user_model,
                 )
                 return response
             except SeldonNotImplementedError:
@@ -271,6 +316,7 @@ def transform_input(
                     seldon_metrics,
                     is_proto,
                     INPUT_TRANSFORM_METRIC_METHOD_TAG,
+                    user_model,
                 )
                 return response
             except SeldonNotImplementedError:
@@ -365,6 +411,7 @@ def transform_output(
                     seldon_metrics,
                     is_proto,
                     OUTPUT_TRANSFORM_METRIC_METHOD_TAG,
+                    user_model,
                 )
                 return response
             except SeldonNotImplementedError:
@@ -449,7 +496,11 @@ def route(
             try:
                 response = user_model.route_raw(request)
                 handle_raw_custom_metrics(
-                    response, seldon_metrics, is_proto, ROUTER_METRIC_METHOD_TAG
+                    response,
+                    seldon_metrics,
+                    is_proto,
+                    ROUTER_METRIC_METHOD_TAG,
+                    user_model,
                 )
                 return response
             except SeldonNotImplementedError:
@@ -563,7 +614,11 @@ def aggregate(
             try:
                 response = user_model.aggregate_raw(request)
                 handle_raw_custom_metrics(
-                    response, seldon_metrics, is_proto, AGGREGATE_METRIC_METHOD_TAG
+                    response,
+                    seldon_metrics,
+                    is_proto,
+                    AGGREGATE_METRIC_METHOD_TAG,
+                    user_model,
                 )
                 return response
             except SeldonNotImplementedError:

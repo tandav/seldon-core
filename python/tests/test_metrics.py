@@ -289,6 +289,9 @@ class UserObjectLowLevel:
             "data": {"names": ["input"], "data": [22]},
         }
 
+class UserObjectLowLevelNoMetrics(UserObjectLowLevel):
+    
+
 
 class UserObjectLowLevelGrpc:
     _metrics = [
@@ -827,3 +830,6 @@ def test_proto_seldon_metrics_endpoint(cls, client_gets_metrics):
             assert labels["mytag"] == "mytagvalue"
 
     assert timer_present
+
+@pytest.mark.parametrize("cls", [UserObject, UserObjectLowLevel])
+def test_handle_raw_custom_metrics(cls, client_gets_metrics):
